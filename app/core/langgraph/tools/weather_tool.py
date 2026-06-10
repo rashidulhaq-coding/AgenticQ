@@ -42,7 +42,12 @@ def get_weather(city: str, unit: Optional[str] = "celsius") -> str:
         A JSON string containing weather data for the city, including
         temperature, condition, humidity, and wind speed.
     """
-    logger.info("weather_tool_called", city=city, unit=unit)
+    logger.info(
+        "tool_input",
+        event_type="tool_input",
+        tool_name="get_weather",
+        args={"city": city, "unit": unit},
+    )
 
     random.seed(hash(city.lower()))
 
@@ -72,6 +77,11 @@ def get_weather(city: str, unit: Optional[str] = "celsius") -> str:
         "source": "simulated",
     }
 
-    logger.info("weather_tool_completed", city=city, condition=condition)
+    logger.info(
+        "tool_output",
+        event_type="tool_output",
+        tool_name="get_weather",
+        result=json.loads(json.dumps(result)),
+    )
 
     return json.dumps(result)

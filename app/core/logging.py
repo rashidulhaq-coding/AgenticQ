@@ -225,8 +225,35 @@ def setup_logging() -> None:
         "botocore",
         "s3transfer",
         "pdfminer",
+        "sse_starlette",
+        "sse",
+        "rustls",
+        "hickory_net",
+        "hickory_resolver",
+        "h2",
+        "hyper_util",
+        "primp",
+        "ddgs",
+        "cookie_store",
+        "reqwest",
+        "hpack",
+        "langchain",
+        "langgraph",
     ]:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+    # Add a filter to suppress non-app DEBUG logs at the handler level
+    class AppOnlyFilter(logging.Filter):
+        """Only allow DEBUG+ logs from app.* modules; suppress DEBUG from others."""
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            if record.levelno >= logging.INFO:
+                return True
+            return record.name.startswith("app.")
+
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.addFilter(AppOnlyFilter())
 
     logging.getLogger("unstructured").setLevel(logging.ERROR)
 

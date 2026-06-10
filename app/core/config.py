@@ -95,10 +95,10 @@ class Settings:
         self.ENVIRONMENT = get_environment()
 
         # Application Settings
-        self.PROJECT_NAME = os.getenv("PROJECT_NAME", "Quote Comparison Agent")
+        self.PROJECT_NAME = os.getenv("PROJECT_NAME", "AgenticQA")
         self.VERSION = os.getenv("VERSION", "1.0.0")
         self.DESCRIPTION = os.getenv(
-            "DESCRIPTION", "A quote comparison agent"
+            "DESCRIPTION", "An agentic qa agent."
         )
         self.API_V1_STR = os.getenv("API_V1_STR", "/api/v1")
         self.DEBUG = os.getenv("DEBUG", "false").lower() in ("true", "1", "t", "yes")
@@ -122,13 +122,7 @@ class Settings:
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         self.LOG_FORMAT = os.getenv("LOG_FORMAT", "json")  # "json" or "console"
 
-        # Rate Limiting Configuration
-        self.RATE_LIMIT_DEFAULT = os.getenv("RATE_LIMIT_DEFAULT", ["1 per minute", "300 per hour"])
-        self.RATE_LIMIT_CHAT = os.getenv("RATE_LIMIT_CHAT", self.RATE_LIMIT_DEFAULT)
-        self.RATE_LIMIT_CHAT_STREAM = os.getenv("RATE_LIMIT_CHAT_STREAM", self.RATE_LIMIT_DEFAULT)
-
-
-        # Apply environment-specific settings
+        
         self.apply_environment_settings()
 
     def apply_environment_settings(self):

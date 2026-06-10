@@ -66,20 +66,62 @@ class QAAgent:
         if not any(isinstance(m, SystemMessage) for m in messages):
             messages = [SystemMessage(content=system_prompt)] + messages
 
-        logger.info("qa_agent_llm_node_invoked", message_count=len(messages))
+        message_summary = [
+            {
+                "type": type(m).__name__,
+                "content_length": len(m.content) if hasattr(m, "content") else 0,
+                "content_preview": (m.content[:100] + "..." if len(str(m.content)) > 100 else str(m.content)) if hasattr(m, "content") else None,
+            }
+            for m in messages
+        ]
+
+        logger.info(
+            "llm_api_invoked",
+            event_type="llm_input",
+            message_count=len(messages),
+            messages_summary=message_summary,
+        )
 
         bound_llm = self._llm.bind_tools(self._tools)
 
         try:
             response = await bound_llm.ainvoke(messages, config=config)
+
+            tool_calls_info = None
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                tool_calls_info = [
+                    {
+                        "name": tc.get("name", "unknown") if isinstance(tc, dict) else getattr(tc, "name", "unknown"),
+                        "id": tc.get("id", "unknown") if isinstance(tc, dict) else getattr(tc, "id", "unknown"),
+                        "args_length": len(str(tc.get("args", {})) if isinstance(tc, dict) else getattr(tc, "args", {})),
+                    }
+                    for tc in response.tool_calls
+                ]
+
+            response_info = {
+                "content_length": len(response.content) if hasattr(response, "content") else 0,
+                "content_preview": (response.content[:200] + "..." if len(str(response.content)) > 200 else str(response.content)) if hasattr(response, "content") else None,
+                "has_tool_calls": bool(tool_calls_info),
+                "tool_calls": tool_calls_info,
+            }
+
             logger.info(
-                "qa_agent_llm_node_completed",
-                has_tool_calls=bool(getattr(response, "tool_calls", None)),
+                "llm_api_completed",
+                event_type="llm_output",
+                response=response_info,
+                success=True,
             )
+
             return {"messages": [response]}
 
         except Exception as exc:
-            logger.error("qa_agent_llm_node_error", error=str(exc))
+            logger.error(
+                "llm_api_error",
+                event_type="llm_output",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                success=False,
+            )
             fallback_response = AIMessage(
                 content="I encountered an error while processing your request. Please try again."
             )
@@ -90,28 +132,67 @@ class QAAgent:
         last_message = state.messages[-1]
         tool_calls = getattr(last_message, "tool_calls", [])
 
-        logger.info("qa_agent_tool_node_called", tool_count=len(tool_calls))
+        tool_calls_input = [
+            {
+                "name": tc.get("name", "unknown") if isinstance(tc, dict) else getattr(tc, "name", "unknown"),
+                "id": tc.get("id", "unknown") if isinstance(tc, dict) else getattr(tc, "id", "unknown"),
+                "args": tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {}),
+            }
+            for tc in tool_calls
+        ]
+
+        logger.info(
+            "tool_input",
+            event_type="tool_input",
+            tool_count=len(tool_calls),
+            tools=tool_calls_input,
+        )
 
         try:
             result = await self._tool_node.ainvoke(state, config)
             out_msgs = result.get("messages", []) if isinstance(result, dict) else getattr(result, "messages", [])
-            logger.info("qa_agent_tool_node_completed", output_count=len(out_msgs))
+
+            tool_outputs = []
+            for msg in out_msgs:
+                if hasattr(msg, "name"):
+                    tool_outputs.append({
+                        "tool_name": getattr(msg, "name", "unknown"),
+                        "content_length": len(msg.content) if hasattr(msg, "content") else 0,
+                        "content_preview": (msg.content[:300] + "..." if len(str(msg.content)) > 300 else str(msg.content)) if hasattr(msg, "content") else None,
+                    })
+
+            logger.info(
+                "tool_output",
+                event_type="tool_output",
+                output_count=len(out_msgs),
+                outputs=tool_outputs,
+                success=True,
+            )
+
             return {
                 "messages": out_msgs,
                 "tool_call_count": 1,
             }
 
         except Exception as exc:
-            logger.error("qa_agent_tool_node_error", error=str(exc))
+            logger.error(
+                "tool_error",
+                event_type="tool_output",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                success=False,
+            )
             from langchain_core.messages import ToolMessage
 
             fallback_msgs = []
             for tc in tool_calls:
+                tool_name = tc.get("name", "unknown") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                tool_id = tc.get("id", "unknown") if isinstance(tc, dict) else getattr(tc, "id", "unknown")
                 fallback_msgs.append(
                     ToolMessage(
                         content=f"Error executing tool: {exc}",
-                        name=tc.get("name", "unknown"),
-                        tool_call_id=tc.get("id", "unknown"),
+                        name=tool_name,
+                        tool_call_id=tool_id,
                     )
                 )
             return {
@@ -160,7 +241,11 @@ class QAAgent:
 
     async def ainvoke(self, query: str, config: Dict[str, Any] = None) -> str:
         """Run the agent on a user query and return the final answer (non-streaming)."""
-        logger.info("qa_agent_ainvoke_started", query=query[:100])
+        logger.info(
+            "agent_ainvoke_started",
+            event_type="agent_start",
+            query_preview=query[:100] if len(query) > 100 else query,
+        )
 
         if config is None:
             config = {}
@@ -173,19 +258,34 @@ class QAAgent:
 
         try:
             result = await self.graph.ainvoke(input_state, config=config)
+
+            if isinstance(result, dict):
+                messages = result.get("messages", [])
+            else:
+                messages = getattr(result, "messages", [])
+
+            if messages and isinstance(messages[-1], AIMessage):
+                answer = messages[-1].content
+                logger.info(
+                    "agent_ainvoke_completed",
+                    event_type="agent_complete",
+                    answer_length=len(answer),
+                    success=True,
+                )
+                return answer
+
+            logger.warning("agent_ainvoke_no_response", event_type="agent_complete", success=False)
+            return "I was unable to process your request. Please try again."
+
         except Exception as exc:
-            logger.error("qa_agent_ainvoke_error", error=str(exc))
+            logger.error(
+                "agent_ainvoke_error",
+                event_type="agent_error",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                success=False,
+            )
             return f"An error occurred while processing your request: {exc}"
-
-        if isinstance(result, dict):
-            messages = result.get("messages", [])
-        else:
-            messages = getattr(result, "messages", [])
-
-        if messages and isinstance(messages[-1], AIMessage):
-            return messages[-1].content
-
-        return "I was unable to process your request. Please try again."
 
     async def astream_tokens(
         self,
@@ -193,7 +293,11 @@ class QAAgent:
         config: Dict[str, Any] = None,
     ) -> AsyncGenerator[ChatStreamChunk, None]:
         """Stream the agent's response as tokens via SSE."""
-        logger.info("qa_agent_astream_started", query=query[:100])
+        logger.info(
+            "stream_agent_started",
+            event_type="agent_start",
+            query_preview=query[:100] if len(query) > 100 else query,
+        )
 
         if config is None:
             config = {}
@@ -220,15 +324,33 @@ class QAAgent:
 
                 elif kind == "on_tool_start":
                     tool_name = event.get("name", "unknown")
+                    input_data = event.get("data", {}).get("input", {})
+                    logger.info(
+                        "stream_tool_start",
+                        event_type="tool_input",
+                        tool_name=tool_name,
+                        tool_input=input_data,
+                    )
                     display_name = tool_name.replace("_", " ").title()
                     yield ChatStreamChunk(type="tool_call", content=f"Using {display_name}...", tool_name=tool_name)
 
                 elif kind == "on_tool_end":
                     tool_name = event.get("name", "unknown")
-                    logger.info("qa_agent_tool_completed", tool_name=tool_name)
+                    output_data = event.get("data", {}).get("output", {})
+                    logger.info(
+                        "stream_tool_end",
+                        event_type="tool_output",
+                        tool_name=tool_name,
+                        tool_output_preview=str(output_data)[:300] if output_data else None,
+                    )
 
         except Exception as exc:
-            logger.error("qa_agent_stream_error", error=str(exc))
+            logger.error(
+                "stream_agent_error",
+                event_type="agent_error",
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             yield ChatStreamChunk(type="error", content="An error occurred while processing your request.")
 
         finally:
