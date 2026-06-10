@@ -18,11 +18,8 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
-from app.core.limiter import limiter
 from app.core.logging import logger
 from app.core.config import Environment
 from app.api.chatbot import router as chatbot_router
@@ -41,8 +38,6 @@ app = FastAPI(
 
 
 # Set up rate limiter exception handler
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # Add validation exception handler
@@ -91,7 +86,6 @@ app.include_router(chatbot_router, prefix=settings.API_V1_STR)
 
 
 @app.get("/")
-@limiter.limit(settings.RATE_LIMIT_DEFAULT)
 async def root(request: Request):
     """Root endpoint returning basic API information."""
     logger.info("root_endpoint_called")
@@ -106,7 +100,6 @@ async def root(request: Request):
 
 
 @app.get("/health")
-@limiter.limit(settings.RATE_LIMIT_DEFAULT)
 async def health_check(request: Request) -> Dict[str, Any]:
     """Health check endpoint with environment-specific information.
 

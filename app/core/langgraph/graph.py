@@ -98,11 +98,23 @@ class QAAgent:
                     for tc in response.tool_calls
                 ]
 
+            usage_metadata = getattr(response, "usage_metadata", None) or {}
+            input_tokens = usage_metadata.get("input_tokens", 0) if isinstance(usage_metadata, dict) else 0
+            output_tokens = usage_metadata.get("output_tokens", 0) if isinstance(usage_metadata, dict) else 0
+            total_tokens = usage_metadata.get("total_tokens", 0) if isinstance(usage_metadata, dict) else 0
+
+            response_metadata = getattr(response, "response_metadata", None) or {}
+            model_name = response_metadata.get("model_name", "") if isinstance(response_metadata, dict) else ""
+
             response_info = {
                 "content_length": len(response.content) if hasattr(response, "content") else 0,
                 "content_preview": (response.content[:200] + "..." if len(str(response.content)) > 200 else str(response.content)) if hasattr(response, "content") else None,
                 "has_tool_calls": bool(tool_calls_info),
                 "tool_calls": tool_calls_info,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+                "model_name": model_name,
             }
 
             logger.info(
@@ -112,7 +124,17 @@ class QAAgent:
                 success=True,
             )
 
-            return {"messages": [response]}
+            state_update: Dict[str, Any] = {"messages": [response]}
+            if input_tokens:
+                state_update["input_tokens"] = input_tokens
+            if output_tokens:
+                state_update["output_tokens"] = output_tokens
+            if total_tokens:
+                state_update["total_tokens"] = total_tokens
+            if model_name:
+                state_update["agent_model"] = model_name
+
+            return state_update
 
         except Exception as exc:
             logger.error(
@@ -254,6 +276,9 @@ class QAAgent:
             "messages": [HumanMessage(content=query)],
             "current_query": query,
             "tool_call_count": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
         }
 
         try:
@@ -261,8 +286,16 @@ class QAAgent:
 
             if isinstance(result, dict):
                 messages = result.get("messages", [])
+                total_input_tokens = result.get("input_tokens", 0)
+                total_output_tokens = result.get("output_tokens", 0)
+                total_tokens = result.get("total_tokens", 0)
+                agent_model = result.get("agent_model", "")
             else:
                 messages = getattr(result, "messages", [])
+                total_input_tokens = getattr(result, "input_tokens", 0)
+                total_output_tokens = getattr(result, "output_tokens", 0)
+                total_tokens = getattr(result, "total_tokens", 0)
+                agent_model = getattr(result, "agent_model", "")
 
             if messages and isinstance(messages[-1], AIMessage):
                 answer = messages[-1].content
@@ -271,6 +304,10 @@ class QAAgent:
                     event_type="agent_complete",
                     answer_length=len(answer),
                     success=True,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    total_tokens=total_tokens,
+                    agent_model=agent_model,
                 )
                 return answer
 
@@ -306,6 +343,9 @@ class QAAgent:
             "messages": [HumanMessage(content=query)],
             "current_query": query,
             "tool_call_count": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
         }
 
         try:

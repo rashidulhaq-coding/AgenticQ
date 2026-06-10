@@ -36,7 +36,6 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
         conversation_id=conversation_id,
         message_length=len(chat_request.message),
         message_preview=chat_request.message[:200] if len(chat_request.message) > 200 else chat_request.message,
-        metadata=chat_request.metadata or {},
     )
 
     config = {

@@ -1,11 +1,11 @@
 """Schemas for the QA agent API and internal state."""
 
-from typing import Any, Dict, List, Optional
+import operator
+from typing import Annotated, Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from langgraph.graph.message import add_messages
-from typing import Annotated
 from langchain_core.messages import BaseMessage
 
 
@@ -36,8 +36,12 @@ class AgentState(BaseModel):
     """Internal state for the QA agent graph."""
 
     messages: Annotated[List[BaseMessage], add_messages] = Field(default_factory=list)
-    tool_call_count: int = Field(default=0)
+    tool_call_count: Annotated[int, operator.add] = Field(default=0)
     current_query: str = Field(default="")
+    input_tokens: Annotated[int, operator.add] = Field(default=0)
+    output_tokens: Annotated[int, operator.add] = Field(default=0)
+    total_tokens: Annotated[int, operator.add] = Field(default=0)
+    agent_model: str = Field(default="")
 
 
 class AgentInputState(BaseModel):
