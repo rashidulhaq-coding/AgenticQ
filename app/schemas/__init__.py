@@ -16,11 +16,31 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="Optional conversation ID for continuity")
 
 
+class Source(BaseModel):
+    """A source citation used in an answer."""
+
+    name: str = Field(..., description="Name or title of the source")
+    url: str = Field(..., description="URL of the source")
+
+
+class QAResponse(BaseModel):
+    """Structured output schema for the QA agent's final answer."""
+
+    answer: str = Field(..., description="The answer to the user's question")
+    sources: List[Source] = Field(default_factory=list, description="Sources cited in the answer")
+
+
 class ChatResponse(BaseModel):
     """Response from the chat endpoint."""
 
     answer: str = Field(..., description="The agent's answer to the user's question")
+    sources: List[Source] = Field(default_factory=list, description="Sources cited in the answer")
     conversation_id: str = Field(..., description="The conversation ID for this session")
+    input_tokens: int = Field(default=0, description="Total input tokens consumed")
+    output_tokens: int = Field(default=0, description="Total output tokens consumed")
+    total_tokens: int = Field(default=0, description="Total tokens consumed")
+    total_duration_ms: float = Field(default=0, description="Total wall-clock duration in milliseconds")
+    structured_output_duration_ms: float = Field(default=0, description="Duration of structured output call in milliseconds")
 
 
 class ChatStreamChunk(BaseModel):
