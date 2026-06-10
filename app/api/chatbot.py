@@ -14,7 +14,7 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from app.core.config import settings
 from app.core.langgraph.graph import qa_agent
 from app.core.logging import logger
-from app.schemas import ChatRequest, ChatResponse, ChatStreamChunk, Source
+from app.schemas import ChatRequest, ChatResponse, ChatStreamChunk
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -47,12 +47,10 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
     try:
         result = await qa_agent.ainvoke(chat_request.message, config=config)
         answer = result["answer"]
-        sources = result.get("sources", [])
         input_tokens = result.get("input_tokens", 0)
         output_tokens = result.get("output_tokens", 0)
         total_tokens = result.get("total_tokens", 0)
         total_duration_ms = result.get("total_duration_ms", 0)
-        structured_output_duration_ms = result.get("structured_output_duration_ms", 0)
 
         logger.info(
             "api_response_sent",
@@ -60,12 +58,10 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
             endpoint="/chat",
             conversation_id=conversation_id,
             answer_length=len(answer),
-            sources_count=len(sources),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
             total_duration_ms=total_duration_ms,
-            structured_output_duration_ms=structured_output_duration_ms,
             success=True,
         )
     except Exception as exc:
@@ -79,24 +75,20 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
             success=False,
         )
         answer = f"An error occurred while processing your request: {exc}"
-        sources = []
         input_tokens = 0
         output_tokens = 0
         total_tokens = 0
         total_duration_ms = 0
-        structured_output_duration_ms = 0
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content=ChatResponse(
             answer=answer,
-            sources=[Source(**s) for s in sources],
             conversation_id=conversation_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
             total_duration_ms=total_duration_ms,
-            structured_output_duration_ms=structured_output_duration_ms,
         ).model_dump(),
     )
 
@@ -120,23 +112,24 @@ async def _stream_chat(query: str, conversation_id: str) -> AsyncGenerator[Serve
 
     try:
         async for chunk in qa_agent.astream_tokens(query, config=config):
-            if chunk.type != "done":
-                if chunk.type == "token":
-                    logger.debug(
-                        "stream_token",
-                        event_type="api_stream_output",
-                        conversation_id=conversation_id,
-                        token=chunk.content,
-                    )
-                elif chunk.type == "tool_call":
-                    logger.info(
-                        "stream_tool_started",
-                        event_type="api_stream_output",
-                        conversation_id=conversation_id,
-                        tool_name=chunk.tool_name,
-                        message=chunk.content,
-                    )
-                yield ServerSentEvent(data=chunk.model_dump_json())
+            if chunk.type == "done":
+                break
+            if chunk.type == "token":
+                logger.debug(
+                    "stream_token",
+                    event_type="api_stream_output",
+                    conversation_id=conversation_id,
+                    token=chunk.content,
+                )
+            elif chunk.type == "tool_call":
+                logger.info(
+                    "stream_tool_started",
+                    event_type="api_stream_output",
+                    conversation_id=conversation_id,
+                    tool_name=chunk.tool_name,
+                    message=chunk.content,
+                )
+            yield ServerSentEvent(data=chunk.model_dump_json())
 
         logger.info(
             "stream_api_response_completed",

@@ -17,30 +17,34 @@ class ChatRequest(BaseModel):
 
 
 class Source(BaseModel):
-    """A source citation used in an answer."""
+    """A web source cited in an answer."""
 
-    name: str = Field(..., description="Name or title of the source")
-    url: str = Field(..., description="URL of the source")
+    name: str = Field(..., description="Short display name of the source, e.g. 'BBC News' or 'Wikipedia'")
+    url: str = Field(..., description="Full URL of the source, e.g. 'https://www.bbc.com/news/article-123'")
 
 
 class QAResponse(BaseModel):
-    """Structured output schema for the QA agent's final answer."""
+    """Structured output for the QA agent's final answer with separated answer text and source citations."""
 
-    answer: str = Field(..., description="The answer to the user's question")
-    sources: List[Source] = Field(default_factory=list, description="Sources cited in the answer")
+    answer: str = Field(
+        ...,
+        description="The plain-text answer to the user's question. Do NOT include URLs, markdown links, or a sources section here. Only the factual response text.",
+    )
+    sources: List[Source] = Field(
+        default_factory=list,
+        description="Every external source referenced in the answer. Each entry must have a 'name' (short display name) and 'url' (full URL). Extract all URLs mentioned in the answer into this list.",
+    )
 
 
 class ChatResponse(BaseModel):
     """Response from the chat endpoint."""
 
     answer: str = Field(..., description="The agent's answer to the user's question")
-    sources: List[Source] = Field(default_factory=list, description="Sources cited in the answer")
     conversation_id: str = Field(..., description="The conversation ID for this session")
     input_tokens: int = Field(default=0, description="Total input tokens consumed")
     output_tokens: int = Field(default=0, description="Total output tokens consumed")
     total_tokens: int = Field(default=0, description="Total tokens consumed")
     total_duration_ms: float = Field(default=0, description="Total wall-clock duration in milliseconds")
-    structured_output_duration_ms: float = Field(default=0, description="Duration of structured output call in milliseconds")
 
 
 class ChatStreamChunk(BaseModel):

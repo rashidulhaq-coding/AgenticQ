@@ -11,7 +11,6 @@ import time
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, List
 
-from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
@@ -21,7 +20,7 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.core.langgraph.tools import ALL_TOOLS
 from app.core.prompts import load_prompt
-from app.schemas import AgentState, ChatStreamChunk, QAResponse
+from app.schemas import AgentState, ChatStreamChunk
 from app.utils.model_utils import get_llm_model
 
 MAX_TOOL_CALLS = settings.MAX_TOOL_CALLS
@@ -44,9 +43,6 @@ class QAAgent:
         self._tools = ALL_TOOLS
         self._tool_names = {t.name: t for t in self._tools}
         self._llm = get_llm_model(model_name=settings.QWEN_3_5_MODEL, streaming=True)
-        self._structured_llm = get_llm_model(
-            model_name=settings.QWEN_3_5_MODEL, streaming=False
-        ).with_structured_output(QAResponse, method="function_calling")
         self._tool_node = ToolNode(self._tools)
         self._capabilities = _build_capabilities(self._tools)
         self.graph = self._build_graph().compile()
@@ -284,11 +280,7 @@ class QAAgent:
         return graph
 
     async def ainvoke(self, query: str, config: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Run the agent on a user query and return a structured answer with sources.
-
-        The agent first runs the ReAct loop to gather information via tools,
-        then uses a structured-output LLM call to produce the final answer.
-        """
+        """Run the agent on a user query and return the answer with metadata."""
         logger.info(
             "agent_ainvoke_started",
             event_type="agent_start",
@@ -313,15 +305,15 @@ class QAAgent:
 
             if isinstance(result, dict):
                 messages = result.get("messages", [])
-                total_input_tokens = result.get("input_tokens", 0)
-                total_output_tokens = result.get("output_tokens", 0)
+                input_tokens = result.get("input_tokens", 0)
+                output_tokens = result.get("output_tokens", 0)
                 total_tokens = result.get("total_tokens", 0)
                 agent_model = result.get("agent_model", "")
                 step_timings = result.get("step_timings", [])
             else:
                 messages = getattr(result, "messages", [])
-                total_input_tokens = getattr(result, "input_tokens", 0)
-                total_output_tokens = getattr(result, "output_tokens", 0)
+                input_tokens = getattr(result, "input_tokens", 0)
+                output_tokens = getattr(result, "output_tokens", 0)
                 total_tokens = getattr(result, "total_tokens", 0)
                 agent_model = getattr(result, "agent_model", "")
                 step_timings = getattr(result, "step_timings", [])
@@ -329,74 +321,31 @@ class QAAgent:
             total_duration_ms = sum(t.get("duration_ms", 0) for t in step_timings)
 
             if messages and isinstance(messages[-1], AIMessage):
-                conversation_text = ""
-                for msg in messages:
-                    role = type(msg).__name__
-                    content = msg.content if hasattr(msg, "content") else str(msg)
-                    conversation_text += f"{role}: {content}\n\n"
-
-                format_prompt = (
-                    "Based on the conversation below, provide your final answer. "
-                    "Include all sources you referenced with their names and URLs.\n\n"
-                    f"Conversation:\n{conversation_text}"
-                )
-
-                structured_start = time.perf_counter()
-                structured_callback = UsageMetadataCallbackHandler()
-                try:
-                    qa_response = await self._structured_llm.ainvoke(
-                        [SystemMessage(content=self._get_system_prompt()), HumanMessage(content=format_prompt)],
-                        config={"callbacks": [structured_callback]},
-                    )
-                    answer = qa_response.answer
-                    sources = [{"name": s.name, "url": s.url} for s in qa_response.sources] if qa_response.sources else []
-                except Exception as exc:
-                    structured_duration_ms = round((time.perf_counter() - structured_start) * 1000, 2)
-                    logger.warning(
-                        "structured_output_fallback",
-                        event_type="structured_output",
-                        error=str(exc),
-                        duration_ms=structured_duration_ms,
-                    )
-                    answer = messages[-1].content
-                    sources = []
-                    structured_duration_ms = round((time.perf_counter() - structured_start) * 1000, 2)
-                else:
-                    structured_duration_ms = round((time.perf_counter() - structured_start) * 1000, 2)
-
-                structured_usage = structured_callback.usage_metadata
-                for model_name, usage in structured_usage.items():
-                    total_input_tokens += usage.get("input_tokens", 0)
-                    total_output_tokens += usage.get("output_tokens", 0)
-                    total_tokens += usage.get("total_tokens", 0)
-
+                answer = messages[-1].content
                 logger.info(
                     "agent_ainvoke_completed",
                     event_type="agent_complete",
                     answer_length=len(answer),
-                    sources_count=len(sources),
                     success=True,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
                     total_tokens=total_tokens,
                     agent_model=agent_model,
                     total_duration_ms=round(total_duration_ms, 2),
                     step_timings=step_timings,
-                    structured_output_duration_ms=structured_duration_ms,
-                    structured_usage_metadata=structured_usage,
                 )
                 return {
                     "answer": answer,
-                    "sources": sources,
-                    "input_tokens": total_input_tokens,
-                    "output_tokens": total_output_tokens,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
                     "total_tokens": total_tokens,
+                    "agent_model": agent_model,
                     "total_duration_ms": round(total_duration_ms, 2),
-                    "structured_output_duration_ms": structured_duration_ms,
+                    "step_timings": step_timings,
                 }
 
             logger.warning("agent_ainvoke_no_response", event_type="agent_complete", success=False)
-            return {"answer": "I was unable to process your request. Please try again.", "sources": []}
+            return {"answer": "I was unable to process your request. Please try again."}
 
         except Exception as exc:
             logger.error(
@@ -406,7 +355,7 @@ class QAAgent:
                 error_type=type(exc).__name__,
                 success=False,
             )
-            return {"answer": f"An error occurred while processing your request: {exc}", "sources": []}
+            return {"answer": f"An error occurred while processing your request: {exc}"}
 
     async def astream_tokens(
         self,
@@ -423,13 +372,6 @@ class QAAgent:
         if config is None:
             config = {}
 
-        usage_callback = UsageMetadataCallbackHandler()
-        existing_callbacks = config.get("callbacks", [])
-        if isinstance(existing_callbacks, list):
-            config["callbacks"] = existing_callbacks + [usage_callback]
-        else:
-            config["callbacks"] = [usage_callback]
-
         input_state = {
             "messages": [HumanMessage(content=query)],
             "current_query": query,
@@ -440,13 +382,29 @@ class QAAgent:
             "step_timings": [],
         }
 
+        stream_input_tokens = 0
+        stream_output_tokens = 0
+        stream_total_tokens = 0
+        stream_model_name = ""
         stream_start = time.perf_counter()
 
         try:
             async for event in self.graph.astream_events(input_state, config=config, version="v2"):
                 kind = event["event"]
 
-                if kind == "on_chat_model_stream":
+                if kind == "on_chat_model_end":
+                    output_msg = event["data"].get("output")
+                    if output_msg:
+                        usage_meta = getattr(output_msg, "usage_metadata", None) or {}
+                        if isinstance(usage_meta, dict):
+                            stream_input_tokens += usage_meta.get("input_tokens", 0)
+                            stream_output_tokens += usage_meta.get("output_tokens", 0)
+                            stream_total_tokens += usage_meta.get("total_tokens", 0)
+                        resp_meta = getattr(output_msg, "response_metadata", None) or {}
+                        if isinstance(resp_meta, dict) and resp_meta.get("model_name"):
+                            stream_model_name = resp_meta["model_name"]
+
+                elif kind == "on_chat_model_stream":
                     chunk = event["data"].get("chunk")
                     content = getattr(chunk, "content", "") if chunk else ""
                     if isinstance(content, list):
@@ -489,36 +447,25 @@ class QAAgent:
 
         finally:
             total_duration_ms = round((time.perf_counter() - stream_start) * 1000, 2)
-            aggregated_usage = usage_callback.usage_metadata
-
-            total_input_tokens = 0
-            total_output_tokens = 0
-            total_tokens_count = 0
-            for model_name, usage in aggregated_usage.items():
-                total_input_tokens += usage.get("input_tokens", 0)
-                total_output_tokens += usage.get("output_tokens", 0)
-                total_tokens_count += usage.get("total_tokens", 0)
-
             logger.info(
                 "stream_agent_completed",
                 event_type="agent_complete",
                 total_duration_ms=total_duration_ms,
-                input_tokens=total_input_tokens,
-                output_tokens=total_output_tokens,
-                total_tokens=total_tokens_count,
-                usage_metadata=aggregated_usage,
+                input_tokens=stream_input_tokens,
+                output_tokens=stream_output_tokens,
+                total_tokens=stream_total_tokens,
+                agent_model=stream_model_name,
                 success=True,
             )
-
             yield ChatStreamChunk(
                 type="metadata",
                 content="",
                 metadata={
-                    "input_tokens": total_input_tokens,
-                    "output_tokens": total_output_tokens,
-                    "total_tokens": total_tokens_count,
+                    "input_tokens": stream_input_tokens,
+                    "output_tokens": stream_output_tokens,
+                    "total_tokens": stream_total_tokens,
                     "total_duration_ms": total_duration_ms,
-                    "usage_metadata": aggregated_usage,
+                    "agent_model": stream_model_name,
                 },
             )
             yield ChatStreamChunk(type="done", content="")
