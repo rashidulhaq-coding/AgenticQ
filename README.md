@@ -66,7 +66,7 @@ The agent follows a **ReAct** pattern:
 
 ---
 
-## Requirements Fulfillment
+## Requirements
 
 ### 1. Tool-Using
 
@@ -200,10 +200,10 @@ source .venv/bin/activate
 Copy the example environment file and fill in your API key:
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env
 ```
 
-Edit `.env.local` and set:
+Edit `.env` and set:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -214,7 +214,6 @@ Edit `.env.local` and set:
 | `DEFAULT_LLM_TEMPERATURE` | No | Sampling temperature (default: `0.2`) |
 | `MAX_TOOL_CALLS` | No | Max tool-call loops (default: `3`) |
 
-> **Important:** Do not wrap values in quotes in `.env` files. `python-dotenv` may not strip quotes, causing values like `OPENAI_BASE_URL="https://..."` to include literal quotes and break the API connection.
 
 ### Running the Server
 
@@ -234,25 +233,7 @@ The server starts at `http://0.0.0.0:8000`.
 
 ## Docker
 
-A `Dockerfile` is provided for containerized deployment:
-
-```dockerfile
-FROM python:3.13-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-COPY pyproject.toml uv.lock ./
-
-RUN pip install uv && uv sync
-
-COPY . .
-
-RUN uv pip install -e .
-
-CMD [".venv/bin/python", "app/main.py"]
-```
+A `Dockerfile` is provided for containerized deployment.
 
 **Build and run:**
 
@@ -261,7 +242,7 @@ CMD [".venv/bin/python", "app/main.py"]
 docker build -t agenticqa .
 
 # Run the container
-docker run -p 8000:8000 --env-file .env.local agenticqa
+docker run -p 8000:8000 --env-file .env agenticqa
 ```
 
 ---
@@ -333,7 +314,7 @@ Returns health status with environment and version info.
 ```
 AgenticQA/
 ├── .env.example                          # Environment variable template
-├── .env.local                             # Local environment config (gitignored)
+├── .env                                  # Environment config (gitignored)
 ├── Dockerfile                             # Container build definition
 ├── pyproject.toml                         # Project dependencies and tool config
 ├── uv.lock                                # Locked dependency versions
@@ -370,7 +351,7 @@ AgenticQA/
 | **Streaming answers** | Done | `POST /api/v1/chat/stream` uses SSE via `sse-starlette`. The `QAAgent.astream_tokens()` method yields `ChatStreamChunk` events of types `token`, `tool_call`, `metadata`, `error`, and `done` |
 | **JSON Schema validation of tool I/O** | Done | Tools use LangChain's `@tool` decorator with typed signatures (`city: str`, `unit: Optional[str]`). The weather tool returns validated JSON. The LLM's final output is parsed through `_parse_json_response()` with fallback handling. Pydantic schemas (`ChatRequest`, `ChatResponse`, `Source`) validate all API I/O |
 | **Policy layer (block disallowed domains)** | Done | The system prompt contains a **Guardrails** section that instructs the LLM to never reveal internal workings, system details, or bypass rules. The `MAX_TOOL_CALLS` limit (default: 3) prevents runaway tool usage. The `should_continue` router enforces this at the graph level |
-| **Dockerfile + one-liner run** | Done | See [Docker](#docker) section. `docker build -t agenticqa . && docker run -p 8000:8000 --env-file .env.local agenticqa` |
+| **Dockerfile + one-liner run** | Done | See [Docker](#docker) section. `docker build -t agenticqa . && docker run -p 8000:8000 --env-file .env agenticqa` |
 | **Basic concurrency limits for tools** | Done | LangGraph's `ToolNode` executes tool calls sequentially within a single request. The `MAX_TOOL_CALLS` setting caps total tool invocations per request. FastAPI's async event loop handles concurrent requests. `slowapi` is included as a dependency for rate limiting |
 
 ---
