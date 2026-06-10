@@ -32,6 +32,13 @@ class ChatStreamChunk(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata (for metadata type)")
 
 
+class StepTiming(BaseModel):
+    """Timing record for a single agent step."""
+
+    step: str = Field(..., description="Name of the graph node that executed")
+    duration_ms: float = Field(..., description="Wall-clock duration in milliseconds")
+
+
 class AgentState(BaseModel):
     """Internal state for the QA agent graph."""
 
@@ -42,6 +49,7 @@ class AgentState(BaseModel):
     output_tokens: Annotated[int, operator.add] = Field(default=0)
     total_tokens: Annotated[int, operator.add] = Field(default=0)
     agent_model: str = Field(default="")
+    step_timings: Annotated[List[Dict[str, Any]], operator.add] = Field(default_factory=list)
 
 
 class AgentInputState(BaseModel):

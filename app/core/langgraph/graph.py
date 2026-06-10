@@ -7,6 +7,7 @@ This module implements a simple ReAct agent using LangGraph that:
 4. Synthesizes tool results into a grounded, cited answer
 """
 
+import time
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, List
 
@@ -60,6 +61,7 @@ class QAAgent:
 
     async def llm_node(self, state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
         """Invoke the LLM with current messages, deciding whether to call tools or respond."""
+        start = time.perf_counter()
         messages = list(state.messages)
         system_prompt = self._get_system_prompt()
 
@@ -117,13 +119,6 @@ class QAAgent:
                 "model_name": model_name,
             }
 
-            logger.info(
-                "llm_api_completed",
-                event_type="llm_output",
-                response=response_info,
-                success=True,
-            )
-
             state_update: Dict[str, Any] = {"messages": [response]}
             if input_tokens:
                 state_update["input_tokens"] = input_tokens
@@ -134,23 +129,40 @@ class QAAgent:
             if model_name:
                 state_update["agent_model"] = model_name
 
+            duration_ms = (time.perf_counter() - start) * 1000
+            state_update["step_timings"] = [{"step": "llm_node", "duration_ms": round(duration_ms, 2)}]
+
+            logger.info(
+                "llm_api_completed",
+                event_type="llm_output",
+                response=response_info,
+                duration_ms=round(duration_ms, 2),
+                success=True,
+            )
+
             return state_update
 
         except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
             logger.error(
                 "llm_api_error",
                 event_type="llm_output",
                 error=str(exc),
                 error_type=type(exc).__name__,
+                duration_ms=round(duration_ms, 2),
                 success=False,
             )
             fallback_response = AIMessage(
                 content="I encountered an error while processing your request. Please try again."
             )
-            return {"messages": [fallback_response]}
+            return {
+                "messages": [fallback_response],
+                "step_timings": [{"step": "llm_node", "duration_ms": round(duration_ms, 2)}],
+            }
 
     async def tool_node_wrapper(self, state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
         """Execute tool calls and track the count."""
+        start = time.perf_counter()
         last_message = state.messages[-1]
         tool_calls = getattr(last_message, "tool_calls", [])
 
@@ -183,25 +195,30 @@ class QAAgent:
                         "content_preview": (msg.content[:300] + "..." if len(str(msg.content)) > 300 else str(msg.content)) if hasattr(msg, "content") else None,
                     })
 
+            duration_ms = (time.perf_counter() - start) * 1000
             logger.info(
                 "tool_output",
                 event_type="tool_output",
                 output_count=len(out_msgs),
                 outputs=tool_outputs,
+                duration_ms=round(duration_ms, 2),
                 success=True,
             )
 
             return {
                 "messages": out_msgs,
                 "tool_call_count": 1,
+                "step_timings": [{"step": "tool_node", "duration_ms": round(duration_ms, 2)}],
             }
 
         except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
             logger.error(
                 "tool_error",
                 event_type="tool_output",
                 error=str(exc),
                 error_type=type(exc).__name__,
+                duration_ms=round(duration_ms, 2),
                 success=False,
             )
             from langchain_core.messages import ToolMessage
@@ -220,6 +237,7 @@ class QAAgent:
             return {
                 "messages": fallback_msgs,
                 "tool_call_count": 1,
+                "step_timings": [{"step": "tool_node", "duration_ms": round(duration_ms, 2)}],
             }
 
     def should_continue(self, state: AgentState) -> str:
@@ -279,6 +297,7 @@ class QAAgent:
             "input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
+            "step_timings": [],
         }
 
         try:
@@ -290,12 +309,16 @@ class QAAgent:
                 total_output_tokens = result.get("output_tokens", 0)
                 total_tokens = result.get("total_tokens", 0)
                 agent_model = result.get("agent_model", "")
+                step_timings = result.get("step_timings", [])
             else:
                 messages = getattr(result, "messages", [])
                 total_input_tokens = getattr(result, "input_tokens", 0)
                 total_output_tokens = getattr(result, "output_tokens", 0)
                 total_tokens = getattr(result, "total_tokens", 0)
                 agent_model = getattr(result, "agent_model", "")
+                step_timings = getattr(result, "step_timings", [])
+
+            total_duration_ms = sum(t.get("duration_ms", 0) for t in step_timings)
 
             if messages and isinstance(messages[-1], AIMessage):
                 answer = messages[-1].content
@@ -308,6 +331,8 @@ class QAAgent:
                     output_tokens=total_output_tokens,
                     total_tokens=total_tokens,
                     agent_model=agent_model,
+                    total_duration_ms=round(total_duration_ms, 2),
+                    step_timings=step_timings,
                 )
                 return answer
 
@@ -346,6 +371,7 @@ class QAAgent:
             "input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
+            "step_timings": [],
         }
 
         try:
