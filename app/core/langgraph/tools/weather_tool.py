@@ -74,7 +74,10 @@ def get_weather(city: str, unit: Optional[str] = "celsius") -> str:
         "humidity": f"{humidity}%",
         "wind_speed": f"{wind_speed} km/h",
         "unit": unit or "celsius",
-        "source": "simulated",
+        "source": {
+            "name": "WeatherDemo",
+            "url": "https://weatherdemo.example.com",
+        },
     }
 
     logger.info(
