@@ -13,7 +13,6 @@ class ChatRequest(BaseModel):
     """Request body for the chat endpoint."""
 
     message: str = Field(..., min_length=1, description="The user's question or message")
-    conversation_id: Optional[str] = Field(None, description="Optional conversation ID for continuity")
 
 
 class Source(BaseModel):
@@ -41,7 +40,6 @@ class ChatResponse(BaseModel):
 
     answer: str = Field(..., description="The agent's answer to the user's question")
     sources: List[Source] = Field(default_factory=list, description="Sources cited in the answer")
-    conversation_id: str = Field(..., description="The conversation ID for this session")
     input_tokens: int = Field(default=0, description="Total input tokens consumed")
     output_tokens: int = Field(default=0, description="Total output tokens consumed")
     total_tokens: int = Field(default=0, description="Total tokens consumed")

@@ -27,7 +27,7 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 )
 async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
     """Non-streaming chat endpoint. Returns the full answer at once."""
-    conversation_id = chat_request.conversation_id or str(uuid.uuid4())
+    conversation_id = str(uuid.uuid4())
 
     logger.info(
         "api_request_received",
@@ -88,7 +88,6 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
         content=ChatResponse(
             answer=answer,
             sources=[Source(**s) for s in sources],
-            conversation_id=conversation_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
@@ -161,7 +160,7 @@ async def _stream_chat(query: str, conversation_id: str) -> AsyncGenerator[Serve
 )
 async def chat_stream(request: Request, chat_request: ChatRequest) -> EventSourceResponse:
     """Streaming chat endpoint. Returns tokens via Server-Sent Events."""
-    conversation_id = chat_request.conversation_id or str(uuid.uuid4())
+    conversation_id = str(uuid.uuid4())
 
     logger.info(
         "chat_stream_endpoint_called",
