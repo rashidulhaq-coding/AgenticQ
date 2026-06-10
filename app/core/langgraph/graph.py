@@ -7,6 +7,8 @@ This module implements a simple ReAct agent using LangGraph that:
 4. Synthesizes tool results into a grounded, cited answer
 """
 
+import json
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, List
@@ -20,10 +22,36 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.core.langgraph.tools import ALL_TOOLS
 from app.core.prompts import load_prompt
-from app.schemas import AgentState, ChatStreamChunk
+from app.schemas import AgentState, ChatStreamChunk, Source
 from app.utils.model_utils import get_llm_model
 
 MAX_TOOL_CALLS = settings.MAX_TOOL_CALLS
+
+
+def _parse_json_response(text: str) -> Dict[str, Any]:
+    """Parse a JSON response from the LLM, handling markdown fences and extra text."""
+    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if json_match:
+        text = json_match.group(1)
+
+    brace_start = text.find("{")
+    brace_end = text.rfind("}")
+    if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+        text = text[brace_start:brace_end + 1]
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            answer = data.get("answer", "")
+            sources = []
+            for s in data.get("sources", []):
+                if isinstance(s, dict) and "name" in s and "url" in s:
+                    sources.append({"name": s["name"], "url": s["url"]})
+            return {"answer": answer, "sources": sources}
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return {"answer": text, "sources": []}
 
 
 def _build_capabilities(tools: list) -> str:
@@ -321,11 +349,15 @@ class QAAgent:
             total_duration_ms = sum(t.get("duration_ms", 0) for t in step_timings)
 
             if messages and isinstance(messages[-1], AIMessage):
-                answer = messages[-1].content
+                raw_text = messages[-1].content
+                parsed = _parse_json_response(raw_text)
+                answer = parsed["answer"]
+                sources = parsed["sources"]
                 logger.info(
                     "agent_ainvoke_completed",
                     event_type="agent_complete",
                     answer_length=len(answer),
+                    sources_count=len(sources),
                     success=True,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -336,6 +368,7 @@ class QAAgent:
                 )
                 return {
                     "answer": answer,
+                    "sources": sources,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "total_tokens": total_tokens,
@@ -345,7 +378,7 @@ class QAAgent:
                 }
 
             logger.warning("agent_ainvoke_no_response", event_type="agent_complete", success=False)
-            return {"answer": "I was unable to process your request. Please try again."}
+            return {"answer": "I was unable to process your request. Please try again.", "sources": []}
 
         except Exception as exc:
             logger.error(
@@ -355,7 +388,7 @@ class QAAgent:
                 error_type=type(exc).__name__,
                 success=False,
             )
-            return {"answer": f"An error occurred while processing your request: {exc}"}
+            return {"answer": f"An error occurred while processing your request: {exc}", "sources": []}
 
     async def astream_tokens(
         self,

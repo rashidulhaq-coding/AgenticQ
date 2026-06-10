@@ -14,7 +14,7 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from app.core.config import settings
 from app.core.langgraph.graph import qa_agent
 from app.core.logging import logger
-from app.schemas import ChatRequest, ChatResponse, ChatStreamChunk
+from app.schemas import ChatRequest, ChatResponse, ChatStreamChunk, Source
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -47,6 +47,7 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
     try:
         result = await qa_agent.ainvoke(chat_request.message, config=config)
         answer = result["answer"]
+        sources = result.get("sources", [])
         input_tokens = result.get("input_tokens", 0)
         output_tokens = result.get("output_tokens", 0)
         total_tokens = result.get("total_tokens", 0)
@@ -58,6 +59,7 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
             endpoint="/chat",
             conversation_id=conversation_id,
             answer_length=len(answer),
+            sources_count=len(sources),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
@@ -75,6 +77,7 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
             success=False,
         )
         answer = f"An error occurred while processing your request: {exc}"
+        sources = []
         input_tokens = 0
         output_tokens = 0
         total_tokens = 0
@@ -84,6 +87,7 @@ async def chat(request: Request, chat_request: ChatRequest) -> JSONResponse:
         status_code=status.HTTP_200_OK,
         content=ChatResponse(
             answer=answer,
+            sources=[Source(**s) for s in sources],
             conversation_id=conversation_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

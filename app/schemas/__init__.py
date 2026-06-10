@@ -40,6 +40,7 @@ class ChatResponse(BaseModel):
     """Response from the chat endpoint."""
 
     answer: str = Field(..., description="The agent's answer to the user's question")
+    sources: List[Source] = Field(default_factory=list, description="Sources cited in the answer")
     conversation_id: str = Field(..., description="The conversation ID for this session")
     input_tokens: int = Field(default=0, description="Total input tokens consumed")
     output_tokens: int = Field(default=0, description="Total output tokens consumed")
