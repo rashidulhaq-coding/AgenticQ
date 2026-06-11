@@ -14,6 +14,7 @@ Built with **FastAPI**, **LangGraph**, **LangChain**, and **Qwen (via DashScope 
   - [Prerequisites](#prerequisites)
   - [Installation with uv](#installation-with-uv)
   - [Environment Configuration](#environment-configuration)
+  - [LLM Provider Configuration](#llm-provider-configuration)
   - [Running the Server](#running-the-server)
 - [Docker](#docker)
 - [API Reference](#api-reference)
@@ -208,11 +209,43 @@ Edit `.env` and set:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `APP_ENV` | Yes | Set to `local` for development |
-| `OPENAI_API_KEY` | Yes | Your DashScope/Qwen API key |
-| `OPENAI_BASE_URL` | Yes | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
-| `QWEN_3_5_MODEL` | No | Default model (default: `qwen3.5-plus`) |
+| `OPENAI_API_KEY` | Yes | Your API key for the chosen provider |
+| `OPENAI_BASE_URL` | Yes | OpenAI-compatible endpoint for your provider (see [LLM Provider Configuration](#llm-provider-configuration)) |
+| `QWEN_3_5_MODEL` | No | Default model identifier passed to `ChatOpenAI` (default: `qwen3.5-plus`). Change this to any model name supported by the endpoint you point `OPENAI_BASE_URL` at |
 | `DEFAULT_LLM_TEMPERATURE` | No | Sampling temperature (default: `0.2`) |
 | `MAX_TOOL_CALLS` | No | Max tool-call loops (default: `3`) |
+
+### LLM Provider Configuration
+
+The LLM is created in `app/utils/model_utils.py` via `get_llm_model()`, which returns a `ChatOpenAI` instance configured with `openai_api_key`, `openai_api_base`, and `model` from your `.env`. Because it uses LangChain's `ChatOpenAI` against an **OpenAI-compatible** endpoint, you can point it at **any** provider that exposes an OpenAI-style API — no code changes required.
+
+**Default: Qwen via DashScope (Singapore region)**
+
+The `.env.example` is pre-configured for Qwen models served by DashScope's **Singapore (international)** endpoint:
+
+```env
+OPENAI_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+OPENAI_API_KEY=<your-dashscope-singapore-api-key>
+QWEN_3_5_MODEL=qwen3.5-plus
+```
+
+**Switching DashScope regions**
+
+Just change `OPENAI_BASE_URL` (and the key) to the matching regional endpoint.
+
+The model name in `QWEN_3_5_MODEL` (e.g. `qwen3.5-plus`, `qwen3-max`, `qwen3.5-flash`) stays the same.
+
+**Using OpenAI (or any OpenAI-compatible provider)**
+
+To swap to OpenAI, set `OPENAI_BASE_URL` to the OpenAI endpoint, put your OpenAI key in `OPENAI_API_KEY`, and change `QWEN_3_5_MODEL` to the model name you want to use. The variable name stays the same — only its value changes:
+
+```env
+OPENAI_BASE_URL=
+OPENAI_API_KEY=sk-...
+QWEN_3_5_MODEL=gpt-4o-mini
+```
+
+The same pattern works for any other OpenAI-compatible provider (Azure OpenAI, etc.) — set the provider's base URL, key, and model name, and the app will work without any code changes.
 
 
 ### Running the Server
